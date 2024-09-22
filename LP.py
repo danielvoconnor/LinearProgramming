@@ -1,6 +1,17 @@
+# This code implements some interior point methods from the book
+# Primal-Dual Interior Point Methods by Wright.
+
 import cvxpy as cp
 import numpy as np
 import matplotlib.pyplot as plt
+
+def form_KKT_matrix(A, x, s):
+    m, n = A.shape
+    # Should these zero matrices be constructed one time only outside of this function?
+    return np.block([[np.zeros((n, n)), A.T, np.eye(n)],
+                  [A, np.zeros((m, m)), np.zeros((m, n))],
+                  [np.diag(s), np.zeros((n, m)), np.diag(x)]])
+   
 
 def solveLP_SPF(c, A, b, x, lmbda, s):
     max_iter = 500
@@ -9,18 +20,13 @@ def solveLP_SPF(c, A, b, x, lmbda, s):
     theta = .4
     sigma = 1 - .4 / np.sqrt(n)
 
-    I_n = np.eye(n)
-    zeros_n = np.zeros((n, n))
-    zeros_m = np.zeros((m, m))
-    zeros_mn = np.zeros((m, n))
-    zeros_nm = np.zeros((n, m))
     all_ones = np.ones(n)
     rhs = np.zeros(n + m + n)
     costs = []
     for k in range(max_iter):
-        S = np.diag(s)
-        X = np.diag(x)
-        M = np.block([[zeros_n, A.T, I_n], [A, zeros_m, zeros_mn], [S, zeros_nm, X]])
+        # M = np.block([[zeros_n, A.T, I_n], [A, zeros_m, zeros_mn], [S, zeros_nm, X]])
+        M = form_KKT_matrix(A, x, s)
+
         mu = np.vdot(x, s) / n
         rhs[m+n:] = -x * s + sigma * mu * all_ones
         sln = np.linalg.solve(M, rhs)
@@ -36,7 +42,11 @@ def solveLP_SPF(c, A, b, x, lmbda, s):
 
     return x, costs
 
-
+def solveLP_MPC(c, A, b, x, lmbda, s):
+    # We minimize c^T x subject to Ax = b, x >= 0 using Algorithm MPC.
+    max_iter = 50
+    m, n = A.shape
+    
 n = 10
 m = 5
 
@@ -53,6 +63,8 @@ plt.figure()
 plt.plot(costs)
 plt.show()
 
+M_check = form_KKT_matrix(A, x, s)
+
 x = cp.Variable(n)
 prob = cp.Problem(cp.Minimize(c.T @ x), [A @ x == b, x >= 0])
 prob.solve(tol_feas=1e-9, tol_gap_rel=1e-9)
@@ -61,6 +73,7 @@ x_CVX = x.value
 
 error = np.linalg.norm(x_SPF - x_CVX) / np.linalg.norm(x_CVX)
 print(f'Relative error is: {error}')
+
 
 
 

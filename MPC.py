@@ -6,5 +6,7 @@ import matplotlib.pyplot as plt
 
 def MPC(c, A, b, x0, lmbda0, s0):
     # We minimize c^T x subject to Ax = b, x >= 0 using Algorithm MPC.
+     
+
     
     
