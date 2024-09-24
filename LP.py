@@ -4,6 +4,7 @@
 import cvxpy as cp
 import numpy as np
 import matplotlib.pyplot as plt
+import scipy as sp
 import timeit
 
 def form_KKT_matrix(A, x, s):
@@ -51,9 +52,19 @@ def find_alpha(x, dx):
 
     return alpha
 
+def solve_KKT_system(L, low, x, s, rb, rc, rxs):
+    # See equations 11.31a-c (p. 210) in Primal-Dual Interior Point Methods by Wright.
+    rhs = -rb + A @ (-(x / s) * rc + rxs / s)
+    dlmbda = sp.linalg.cho_solve((L, low), rhs)
+    ds = -rc - A.T @ dlmbda
+    dx = -(rxs + x * ds) / s
+    return dx, dlmbda, ds
+
 def solveLP_MPC(c, A, b, x, lmbda, s):
-    # We minimize c^T x subject to Ax = b, x >= 0 using Algorithm MPC.
+    # We minimize c^T x subject to Ax = b, x >= 0 using Algorithm MPC
+    # from chapter 10 (p. 198) of Primal-Dual Interior Point Methods by Wright.
     max_iter = 20
+    tol = 1e-9
     m, n = A.shape
     xk = x.copy()
     lmbdak = lmbda.copy()
@@ -63,23 +74,33 @@ def solveLP_MPC(c, A, b, x, lmbda, s):
     for k in range(max_iter):
         rb = A @ xk - b
         rc = A.T @ lmbdak + sk - c
-        M = form_KKT_matrix(A, xk, sk)
-        rhs = np.concat((-rc, -rb, -xk * sk))
-        sln = np.linalg.solve(M, rhs)
-        dx_aff = sln[0:n]
-        dlmbda_aff = sln[n:n+m]
-        ds_aff = sln[n+m:]
+ 
+        # M = form_KKT_matrix(A, xk, sk)
+        #rhs = np.concat((-rc, -rb, -xk * sk))
+        #sln = np.linalg.solve(M, rhs)
+        #dx_aff = sln[0:n]
+        #dlmbda_aff = sln[n:n+m]
+        #ds_aff = sln[n+m:]
+
+        # First we solve equation (10.1) in Wright, using the technique described in chapter 11.
+        M = (A * (xk / sk)) @ A.T # See equation 11.3a (p. 210) in Primal-Dual Interior Point Methods by Wright.
+        L, low = sp.linalg.cho_factor(M) # low is "true" if L is lower triangular.
+        dx_aff, dlmbda_aff, ds_aff = solve_KKT_system(L, low, xk, sk, rb, rc, xk*sk)
+
         alpha_aff_primal = find_alpha(xk, dx_aff)
         alpha_aff_dual = find_alpha(sk, ds_aff)
         mu_aff = np.vdot(xk + alpha_aff_primal * dx_aff, sk + alpha_aff_dual * ds_aff) / n
         mu = np.vdot(xk, sk) / n
         sigma = (mu_aff / mu)**3
         
-        rhs = np.concat((np.zeros(n), np.zeros(m), -dx_aff*ds_aff + sigma*mu))
-        sln = np.linalg.solve(M, rhs)
-        dx_cc = sln[0:n]
-        dlmbda_cc = sln[n:n+m]
-        ds_cc = sln[n+m:]
+        #rhs = np.concat((np.zeros(n), np.zeros(m), -dx_aff*ds_aff + sigma*mu))
+        #sln = np.linalg.solve(M, rhs)
+        #dx_cc = sln[0:n]
+        #dlmbda_cc = sln[n:n+m]
+        #ds_cc = sln[n+m:]
+
+        # Now we solve equation (10.7) in Wright, again using the chapter 11 technique.
+        dx_cc, dlmbda_cc, ds_cc = solve_KKT_system(L, low, xk, sk, np.zeros(m), np.zeros(n), dx_aff * ds_aff - sigma * mu) 
         
         dxk = dx_aff + dx_cc
         dlmbdak = dlmbda_aff + dlmbda_cc
@@ -94,6 +115,8 @@ def solveLP_MPC(c, A, b, x, lmbda, s):
         sk = sk + alphak_dual * dsk
 
         mu_vals.append(mu)
+        if abs(mu) < tol: # mu should be positive, but what if roundoff error makes it negative, is that possible?
+             break 
 
     return xk, mu_vals
 
@@ -101,7 +124,7 @@ def solveLP_MPC(c, A, b, x, lmbda, s):
         
     
 n = 500
-m = 300
+m = 100
 
 A = np.random.randn(m, n)
 lmbda = np.random.randn(m)
