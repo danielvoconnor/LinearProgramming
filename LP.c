@@ -21,22 +21,25 @@ int main() {
     double *lmbda = malloc(m * sizeof(double));
     double *s = malloc(n * sizeof(double));
 
+    // Generate values for A.
     for (int i = 0; i < m*n; i++) {
-    //    A[i] = drand48();
-        A[i] = i;
+        A[i] = drand48();
+//        A[i] = i;
     }
 
+    // Initialize x and s, and generate values for c.
     for (int i = 0; i < n; i++) {
          c[i] = drand48();
          x[i] = drand48();
-//         s[i] = drand48();
-         s[i] = -i;
+         s[i] = drand48();
+//         s[i] = -i;
     }
 
+    // Generate values for b.
     for (int i = 0; i < m; i++) {
         b[i] = drand48();
-//        lmbda[i] = drand48();
-        lmbda[i] = i;
+        lmbda[i] = drand48();
+//        lmbda[i] = i;
     }
 
     int LDA = n;
@@ -60,6 +63,7 @@ int main() {
     for (int i = 0; i < m; i++) {
         printf("lmbda[%d] = %f\n", i, lmbda[i]);
     }
+    // c = A^T lmbda + s.
     cblas_dgemv(CblasRowMajor, CblasTrans, m, n, alpha, A, LDA, lmbda, incX, beta, c, incY); 
 
     for (int i = 0; i < n; i++) {
