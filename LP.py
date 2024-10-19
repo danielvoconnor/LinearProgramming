@@ -59,12 +59,15 @@ def find_alpha(x, dx):
     return alpha
 
 def solve_KKT_system(L, low, x, s, rb, rc, rxs):
-    # See equations 11.31a-c (p. 210) in Primal-Dual Interior Point Methods by Wright.
+    # See equations 11.3a-c (p. 210) in Primal-Dual Interior Point Methods by Wright.
     rhs = -rb + A @ (-(x / s) * rc + rxs / s)
     dlmbda = sp.linalg.cho_solve((L, low), rhs)
     ds = -rc - A.T @ dlmbda
     dx = -(rxs + x * ds) / s
     return dx, dlmbda, ds
+
+#def solve_KKT_system_for_QP(L, low, x, s, u, v, w):
+    
 
 def solveLP_MPC(c, A, b, x, lmbda, s):
     # We minimize c^T x subject to Ax = b, x >= 0 using Algorithm MPC
@@ -145,31 +148,53 @@ def solveQP_MPC(Q, c, A, b, x, lmbda, s):
     for k in range(max_iter):
         rb = A @ xk - b
         rc = -Q @ xk + A.T @ lmbdak + sk - c
- 
-        M = form_KKT_matrix_for_QP(Q, A, xk, sk)
-        rhs = np.concat((-rc, -rb, -xk * sk))
-        sln = np.linalg.solve(M, rhs)
-        dx_aff = sln[0:n]
-        dlmbda_aff = sln[n:n+m]
-        ds_aff = sln[n+m:]
 
-#        # First we solve equation (10.1) in Wright, using the technique described in chapter 11.
-#        M = (A * (xk / sk)) @ A.T # See equation 11.3a (p. 210) in 
-#                                  # Primal-Dual Interior Point Methods by Wright.
-#        L, low = sp.linalg.cho_factor(M) # low is "true" if L is lower triangular.
-#        dx_aff, dlmbda_aff, ds_aff = solve_KKT_system(L, low, xk, sk, rb, rc, xk*sk)
+        # First we solve equation (10.1) in Wright, using the technique described in chapter 11.
+        # See p. 210 in Wright.
+        # A slower but relatively clear way to solve the KKT system is commented out below.
+#        M = form_KKT_matrix_for_QP(Q, A, xk, sk)
+#        rhs = np.concat((-rc, -rb, -xk * sk))
+#        sln = np.linalg.solve(M, rhs)
+#        dx_aff = sln[0:n]
+#        dlmbda_aff = sln[n:n+m]
+#        ds_aff = sln[n+m:]
 
+        # The code below could probably be cleaned up or clarified a bit.
+        # We should not form the inverse of H explicitly.
+        # Should I have a function that solves the KKT system with a given right hand side? Perhaps.
+        H = Q + np.diag(sk / xk)
+        Hinv = np.linalg.inv(H)
+        AHinv = A @ Hinv
+        mtrx = AHinv @ A.T
+        L, low = sp.linalg.cho_factor(mtrx)
+        rhs = -rb + AHinv @ (-rc + sk)
+        dlmbda_aff = sp.linalg.cho_solve((L, low), rhs)
+        dx_aff = Hinv @ (A.T @ dlmbda_aff - sk + rc)
+        ds_aff = -sk - (sk / xk) * dx_aff
+        # You can check that dlmbda_aff, dx_aff, and ds_aff here agree with the values
+        # obtained using the slower but more clear method which is commented out above.
+         
         alpha_aff_primal = find_alpha(xk, dx_aff)
         alpha_aff_dual = find_alpha(sk, ds_aff)
         mu_aff = np.vdot(xk + alpha_aff_primal * dx_aff, sk + alpha_aff_dual * ds_aff) / n
         mu = np.vdot(xk, sk) / n
         sigma = (mu_aff / mu)**3
         
-        rhs = np.concat((np.zeros(n), np.zeros(m), -dx_aff*ds_aff + sigma*mu))
-        sln = np.linalg.solve(M, rhs)
-        dx_cc = sln[0:n]
-        dlmbda_cc = sln[n:n+m]
-        ds_cc = sln[n+m:]
+        #######
+        term  = (sigma * mu - dx_aff * ds_aff) / xk
+        rhs = AHinv @ ( -term)
+        dlmbda_cc = sp.linalg.cho_solve((L, low), rhs)
+        dx_cc = Hinv @ (A.T @ dlmbda_cc + term)
+        ds_cc = term - (sk / xk) * dx_cc
+        #######
+        # The slower but relatively clear way to solve the KKT system is commented out below.
+        # You can check that dlmbda_cc, dx_cc, and ds_cc computed above agree with the
+        # values obtained by the slower but more clear method below.
+#        rhs = np.concat((np.zeros(n), np.zeros(m), -dx_aff*ds_aff + sigma*mu))
+#        sln = np.linalg.solve(M, rhs)
+#        dx_cc = sln[0:n]
+#        dlmbda_cc = sln[n:n+m]
+#        ds_cc = sln[n+m:]
 
         # Now we solve equation (10.7) in Wright, again using the chapter 11 technique.
 #        dx_cc, dlmbda_cc, ds_cc = \
@@ -232,7 +257,6 @@ if test_QP:
     print(f'Is x_MPC nonnegative? {min_x_MPC}')
     print(f'Minimum value from MPC is: {cost_MPC}')
     
-   
     Q = cp.psd_wrap(Q) 
     time_start = timeit.default_timer()
     x = cp.Variable(n)
